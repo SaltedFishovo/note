@@ -1,0 +1,47 @@
+JOS通过*env_create(uint8_t \*binary, enum EnvType type)* 创建一个类型为 *type* 的虚拟地址空间，并在该地址空间映射并加载 *binary* 所指向的 ELF 文件中的每个段。
+
+```c
+void
+env_create(uint8_t *binary, enum EnvType type){
+        int err;
+        struct Env ** pp_env, * p_env;
+        // Allocate a env struct in env array, and init it's
+        // high virtual address sapce partion.
+        pp_env = &p_env;
+        if((err = env_alloc(pp_env, 0)) < 0)
+                panic("error:env_create!");
+
+        // Set up the env_type
+        p_env->env_type = type;
+
+        // Load the partion of user.
+        load_icode(p_env, binary);
+
+}
+```
+
+首先，*env_create* 调用 *env_alloc(pp_env, 0)*,  这个函数从 struct env 的空闲链表选择一个空闲节点，保存将要创建的环境的信息，并将一些初始的寄存器状态（段寄存器所需的描述符、通用寄存器清零）保存到结构体中。
+
+然后 *env_alloc()* 通过 *env_setup_vm(e)* 为该虚拟地址空间创建一个页目录，并映射该地址空间的内核部分，本质上就是将内核的页目录复制到该地址空间的页目录中，最后再在该地址空间中 *UVPT* 部分映射自己的页目录。
+
+最后，*env_create* 调用*load_icode(p_env, binary)* ，这个函数先设置这个虚拟地址空间入口点，通过 *p_env->env_tf->tf_eip* 来设置。然后映射该虚拟地址空间的用户部分，主要就是通过遍历 *binry* 所指向的ELF文件的程序头部表中的每个段，获取要加载的段的信息：要加载的位置、段的位置、段的长度等。并通过 *region_alloc* 创建代码数据所需的物理页，并映射到程序要加载到的虚拟地址空间中的位置。
+
+*env_create(uint8_t \*binary, enum EnvType type)* 执行流程：
+
+- 首先调用 *env_alloc(）* 
+  - 在环境空闲链表中寻找一个空闲环境结构体，使用它
+  - env_setup_vm(e) :为新的环境创建页目录，并为其地址空间内核部分做映射
+  - 为该环境设置一些通用的初始信息：envid、栈指针寄存器(USTACKTOP)、段选择子(cs、es等寄存器)、部分进程状态(是否可运行，运行次数，父进程ID)
+  - 设置环境空闲链表，指向一个空闲节点
+- 接着调用*laod_icode()*
+    - 遍历段表，为每一个需要加载的段创建页表、物理内存，然后加载该段
+    - 为栈创建页表，分配物理内存
+
+sys_exofrok:
+
+- 首先调用 *env_alloc(）*
+- 将新环境改为不可运行状态
+- 将环境寄存器状态复制到新环境
+- 为了使得子进程返回0，此时要将子进程寄存器结构体中的eax设置为0
+- 返回pid
+
